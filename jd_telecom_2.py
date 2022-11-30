@@ -4,13 +4,12 @@
 # @Author : github@limoruirui https://github.com/limoruirui
 # @Time : 2022/11/11 10:42
 # cron "*/30 8-20 * * *" script-path=xxx.py,tag=匹配cron用
-# const $ = new Env('某营业厅直播抽奖_2');
+# const $ = new Env('某营业厅直播抽奖');
 # -------------------------------
 """
 1. 脚本仅供学习交流使用, 请在下载后24h内删除
 2. 环境变量说明:
-    必须  TELECOM_PHONE : 电信手机号
-    必须  TELECOM_PASSWORD : 电信服务密码
+    export TELECOM_LOTTERY = 手机号1&密码1换行手机号2&密码2
 3. 必须登录过 电信营业厅 app的账号才能正常运行
 """
 from re import findall
@@ -21,6 +20,9 @@ from requests import post, get, packages
 packages.urllib3.util.ssl_.DEFAULT_CIPHERS += ":HIGH:!DH:!aNULL"
 from datetime import datetime, timedelta
 from asyncio import wait, sleep, run
+
+import time
+import threading
 
 from tools.tool import timestamp, get_environ, print_now
 from tools.send_msg import push
@@ -121,15 +123,15 @@ class TelecomLotter:
         :return:
         """
         print_now(f"当前执行的直播间id为{liveId}")
-        for i in range(8):
+        for i in range(2):
             # active_code1 查询直播间购物车中的大转盘活动id
             active_code1 = self.get_action_id(liveId)
             # active_code2 查询直播间非购物车 而是右上角的大转盘活动id
             active_code2 = self.get_action_id_other(liveId)
             if active_code1 is not None or active_code2 is not None:
                 break
-            print(f"此直播间暂无抽奖活动, 等待90秒后再次查询 剩余查询次数{7 - i}")
-            await sleep(90)
+            print(f"此直播间暂无抽奖活动, 等待2秒后再次查询 剩余查询次数{7 - i}")
+            await sleep(10)
             continue
         if active_code1 is None and active_code2 is None:
             print("查询结束 本直播间暂无抽奖活动")
@@ -172,21 +174,44 @@ class TelecomLotter:
         else:
             print(f"获取奖品信息失败, 接口返回" + str(data))
 
-def main(phone, password):
-    apiType = 1
-    # try:
-    #     url = "https://raw.githubusercontent.com/cyz0105/ql_telecom_choujiang/main/telecomLiveInfo.json"
-    #     data = get(url, timeout=5).json()
-    # except:
-    url = "https://xbk.189.cn/xbkapi/lteration/index/recommend/anchorRecommend?provinceCode=01"
+all_list = []
+def get_urls():
+    urls = []
+    for i in range(1, 36):
+        if i < 10:
+            code_str = '0' + str(i)
+        else:
+            code_str = str(i)
+        url = f'https://xbk.189.cn/xbkapi/lteration/index/recommend/anchorRecommend?provinceCode={code_str}'
+        urls.append(url)
+    return urls
+def get_data(url):
     random_phone = f"1537266{randint(1000, 9999)}"
     headers = {
         "referer": "https://xbk.189.cn/xbk/newHome?version=9.4.0&yjz=no&l=card&longitude=%24longitude%24&latitude=%24latitude%24&utm_ch=hg_app&utm_sch=hg_sh_shdbcdl&utm_as=xbk_tj&loginType=1",
         "user-agent": f"CtClient;9.6.1;Android;12;SM-G9860;{b64encode(random_phone[5:11].encode()).decode().strip('=+')}!#!{b64encode(random_phone[0:5].encode()).decode().strip('=+')}"
     }
+    # print(url)
     data = get(url, headers=headers).json()
-    apiType = 2
-    print(data)
+    body = data["data"]
+    for i in body:
+        if time.strftime('%Y-%m-%d') in i['start_time']:
+            if i not in all_list:
+                name = i['nickname']
+                start_time = i['start_time'].replace(time.strftime('%Y-%m-%d'), '')
+                print(f' {start_time} 房间：{name}')
+                all_list.append(i)
+
+
+
+def main(phone, password):
+    apiType = 1
+    try:
+        url = "https://raw.githubusercontent.com/limoruirui/Hello-World/main/telecomLiveInfo.json"
+        data = get(url, timeout=5).json()        
+    except:
+        data = list_d
+    # print(data)
     liveListInfo = {}
     allLiveInfo = data.values() if apiType == 1 else data["data"]
     for liveInfo in allLiveInfo:
@@ -204,9 +229,31 @@ def main(phone, password):
         TelecomLotter(phone, password).find_price()
 
 if __name__ == '__main__':
+    urls = get_urls()
+    print('加载今日数据ing...')
+    threads = []
+    for url in urls:
+        threads.append(
+            threading.Thread(target=get_data, args=(url,))
+        )
+
+    for thread in threads:
+        thread.start()
+
+    for thread in threads:
+        thread.join()
+
+    list_d = {}
+    f = 1
+    for i in all_list:
+        list_d['liveRoom' + str(f)] = i
+        f += 1
+    print('数据加载完毕')
     phone = get_environ("TELECOM_PHONE_2")
     password = get_environ("TELECOM_PASSWORD_2")
     if phone == "" or password == "":
         print("未填写相应变量 退出")
         exit(0)
+    print("===================手机号:"+ phone +"===================")
     main(phone, password)
+
